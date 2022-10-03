@@ -86,7 +86,7 @@ class SingleQNKEnv(gym.Env):
             )
 
             self.initial_state = tensor(
-                coherent(DIM_RES, np.sqrt(result_first.expect[0, -1])), fock(2, 0)
+                coherent(DIM_RES, np.sqrt(result_first.expect[0][-1])), fock(2, 0)
             )  # second input in coherent squared gives the init num of photons
 
             result_second = mesolve(
@@ -111,7 +111,7 @@ class SingleQNKEnv(gym.Env):
             )
 
             self.initial_state = tensor(
-                coherent(DIM_RES, np.sqrt(result_first.expect[0, -1])), fock(2, 0)
+                coherent(DIM_RES, np.sqrt(result_first.expect[0][-1])), fock(2, 0)
             )  # second input in coherent squared gives the init num of photons
 
             result_second = mesolve(
@@ -147,18 +147,37 @@ class SingleQNKEnv(gym.Env):
 
     def render(self, mode="human"):
 
-        H_experimental = [H_JC, [H_D1, S1], [H_D2, S2]]
-        result_experimental = mesolve(
-            H_experimental,
+        args = {"A1": self.past_action[0], "A2": self.past_action[1], "WR": WR}
+
+        H_first = [H_JC, [H_D1, "A1*exp(-1j*WR*t)"], [H_D2, "A1*exp(1j*WR*t)"]]
+        H_second = [H_JC, [H_D1, "A2*exp(-1j*WR*t)"], [H_D2, "A2*exp(1j*WR*t)"]]
+
+        result_first = mesolve(
+            H_first,
             INITIAL_STATE,
-            T_LIST,
+            T_LIST[0:25],
             c_ops=[np.sqrt(K) * tensor(A, qeye(DIM_Q))],
             e_ops=[tensor(A.dag() * A, qeye(DIM_Q))],
+            args=args,
+        )
+
+        self.initial_state = tensor(
+            coherent(DIM_RES, np.sqrt(result_first.expect[0][-1])), fock(2, 0)
+        )  # second input in coherent squared gives the init num of photons
+
+        result_second = mesolve(
+            H_second,
+            INITIAL_STATE,
+            T_LIST[25:50],
+            c_ops=[np.sqrt(K) * tensor(A, qeye(DIM_Q))],
+            e_ops=[tensor(A.dag() * A, qeye(DIM_Q))],
+            args=args,
+            options=OPTS,
         )
 
         fig, axes = plt.subplots(figsize=(10, 5))
         axes.plot(T_LIST, NAT_DECAY)
-        axes.plot(result_experimental.times, result_experimental.expect[0])
+        axes.plot(result_first.times, result_second.expect[0])
         axes.set_title(
             "Photon Population in Cavity with Experimental Data", fontsize=30
         )
