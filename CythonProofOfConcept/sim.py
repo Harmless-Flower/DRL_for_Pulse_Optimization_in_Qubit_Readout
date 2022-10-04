@@ -22,7 +22,7 @@ MAX_AMP = 10  # Constant determined by the AWG in the lab
 
 T_INITIAL = 0.0
 T_FINAL = 2.0
-LENGTH = 50
+LENGTH = 100
 ACTUAL_START = (T_FINAL - T_INITIAL) / LENGTH + T_INITIAL
 T_LIST = np.linspace(ACTUAL_START, T_FINAL, 50)
 
@@ -54,7 +54,7 @@ class SingleQNKEnv(gym.Env):
         self.count = 0
 
         self.action_space = spaces.Box(
-            np.array([-1, -1]), np.array([1, 1]), dtype=np.float32
+            np.array([-1, -1, -1, -1]), np.array([1, 1, 1, 1]), dtype=np.float32
         )
 
         self.observation_space = spaces.Box(
@@ -65,12 +65,21 @@ class SingleQNKEnv(gym.Env):
         info = {}
 
         self.initial_state = tensor(
-            coherent(DIM_RES, 2), fock(2, 0)
+            coherent(DIM_RES, np.sqrt(PNORM)), fock(DIM_Q, 0)
         )  # second input in coherent squared gives the init num of photons
         args = {"A1": action[0], "A2": action[1], "WR": WR}
 
         H_first = [H_JC, [H_D1, "A1*exp(-1j*WR*t)"], [H_D2, "A1*exp(1j*WR*t)"]]
         H_second = [H_JC, [H_D1, "A2*exp(-1j*WR*t)"], [H_D2, "A2*exp(1j*WR*t)"]]
+
+
+        first_time = int((action[2] + 1)*24)
+        second_time = int((action[3] + 1)*24)
+
+        if first_time == 0:
+            first_time = 1
+        if second_time == 0:
+            second_time = 1
 
         if self.count == 0:
             self.past_action = np.array([0, 0], dtype=np.float32)
@@ -79,7 +88,7 @@ class SingleQNKEnv(gym.Env):
             result_first = mesolve(
                 H_first,
                 INITIAL_STATE,
-                T_LIST[0:25],
+                T_LIST[0:first_time],
                 c_ops=[np.sqrt(K) * tensor(A, qeye(DIM_Q))],
                 e_ops=[tensor(A.dag() * A, qeye(DIM_Q))],
                 args=args,
@@ -92,7 +101,7 @@ class SingleQNKEnv(gym.Env):
             result_second = mesolve(
                 H_second,
                 INITIAL_STATE,
-                T_LIST[25:50],
+                T_LIST[first_time:first_time + second_time],
                 c_ops=[np.sqrt(K) * tensor(A, qeye(DIM_Q))],
                 e_ops=[tensor(A.dag() * A, qeye(DIM_Q))],
                 args=args,
@@ -103,7 +112,7 @@ class SingleQNKEnv(gym.Env):
             result_first = mesolve(
                 H_first,
                 INITIAL_STATE,
-                T_LIST[0:25],
+                T_LIST[0:first_time],
                 c_ops=[np.sqrt(K) * tensor(A, qeye(DIM_Q))],
                 e_ops=[tensor(A.dag() * A, qeye(DIM_Q))],
                 args=args,
@@ -117,14 +126,18 @@ class SingleQNKEnv(gym.Env):
             result_second = mesolve(
                 H_second,
                 INITIAL_STATE,
-                T_LIST[25:50],
+                T_LIST[first_time:first_time + second_time],
                 c_ops=[np.sqrt(K) * tensor(A, qeye(DIM_Q))],
                 e_ops=[tensor(A.dag() * A, qeye(DIM_Q))],
                 args=args,
                 options=OPTS,
             )
+        
+        num_photons = result_second.expect[0][-1]
+        
+        rest_of_decay = np.sum(num_photons*np.exp(-K*T_LIST[(first_time + second_time):(LENGTH - 1)]))
 
-        self.reward = -np.sum(result_first.expect[0]) - np.sum(result_second.expect[0])
+        self.reward = -np.sum(result_first.expect[0]) - np.sum(result_second.expect[0]) - rest_of_decay
         self.observation = np.array(
             [self.past_action[0], self.past_action[1], self.past_sum / 10],
             dtype=np.float32,
@@ -145,17 +158,25 @@ class SingleQNKEnv(gym.Env):
 
         return self.observation
 
-    def render(self, mode="human"):
+    def render(self):
 
         args = {"A1": self.past_action[0], "A2": self.past_action[1], "WR": WR}
 
         H_first = [H_JC, [H_D1, "A1*exp(-1j*WR*t)"], [H_D2, "A1*exp(1j*WR*t)"]]
         H_second = [H_JC, [H_D1, "A2*exp(-1j*WR*t)"], [H_D2, "A2*exp(1j*WR*t)"]]
 
+        first_time = int((self.past_action[2] + 1)*24)
+        second_time = int((self.past_action[3] + 1)*24)
+
+        if first_time == 0:
+            first_time = 1
+        if second_time == 0:
+            second_time = 1
+
         result_first = mesolve(
             H_first,
             INITIAL_STATE,
-            T_LIST[0:25],
+            T_LIST[0:first_time],
             c_ops=[np.sqrt(K) * tensor(A, qeye(DIM_Q))],
             e_ops=[tensor(A.dag() * A, qeye(DIM_Q))],
             args=args,
@@ -168,16 +189,22 @@ class SingleQNKEnv(gym.Env):
         result_second = mesolve(
             H_second,
             INITIAL_STATE,
-            T_LIST[25:50],
+            T_LIST[first_time:first_time + second_time],
             c_ops=[np.sqrt(K) * tensor(A, qeye(DIM_Q))],
             e_ops=[tensor(A.dag() * A, qeye(DIM_Q))],
             args=args,
             options=OPTS,
         )
 
+        num_photons = result_second.expect[0][-1]
+
+        rest_of_decay = num_photons*np.exp(-K*T_LIST[first_time + second_time:LENGTH - 1])
+
         fig, axes = plt.subplots(figsize=(10, 5))
         axes.plot(T_LIST, NAT_DECAY)
-        axes.plot(result_first.times, result_second.expect[0])
+        axes.plot(result_first.times, result_first.expect[0])
+        axes.plot(result_second.times, result_second.expect[0])
+        axes.plot(T_LIST[first_time + second_time:LENGTH - 1], rest_of_decay)
         axes.set_title(
             "Photon Population in Cavity with Experimental Data", fontsize=30
         )
