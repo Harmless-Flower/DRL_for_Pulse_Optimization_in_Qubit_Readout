@@ -2,9 +2,9 @@ from sim import SingleQNKEnv
 
 env = SingleQNKEnv()
 
-episodes = 50
+episodes = 5
 
-for episode in range(episodes):
+for ep in range(episodes):
     done = False
     obs = env.reset()
     while not done:
